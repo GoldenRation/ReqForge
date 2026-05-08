@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>需求到代码 Agent</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/java.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/python.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/sql.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/json.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/languages/yaml.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark.min.css">
+<style>
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --yellow: #d2991d;
+  --red: #f85149;
+  --purple: #a371f7;
+  --radius: 8px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg); color: var(--text);
+  display: flex; height: 100vh; overflow: hidden;
+}
+
+/* ── Sidebar ─────────────────────────────────────────── */
+.sidebar {
+  width: 400px; min-width: 400px;
+  background: var(--surface); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  padding: 24px; gap: 16px;
+  overflow-y: auto;
+}
+.logo { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+.logo span { color: var(--accent); }
+.logo p { font-size: 12px; color: var(--text-dim); font-weight: 400; margin-top: 2px; }
+
+label { font-size: 13px; font-weight: 600; color: var(--text-dim); display: block; margin-bottom: 6px; }
+input, textarea, select {
+  width: 100%; padding: 10px 12px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text);
+  font-size: 14px; font-family: 'SF Mono', 'Fira Code', monospace;
+  resize: vertical;
+}
+textarea { min-height: 280px; line-height: 1.5; }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+
+.btn {
+  padding: 10px 20px; border: none; border-radius: var(--radius);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: #4090e0; }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-secondary { background: var(--border); color: var(--text); }
+.btn-secondary:hover { background: #484f58; }
+
+.actions { display: flex; gap: 8px; }
+
+.preset { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -6px; }
+.preset-chip {
+  font-size: 11px; padding: 3px 8px;
+  border: 1px solid var(--border); border-radius: 12px;
+  cursor: pointer; color: var(--text-dim);
+  transition: all 0.15s;
+}
+.preset-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Progress ────────────────────────────────────────── */
+.progress-section { margin-top: auto; }
+.progress-header { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+.progress-bar-outer {
+  height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden;
+}
+.progress-bar-inner {
+  height: 100%; background: var(--accent);
+  width: 0%; transition: width 0.3s;
+  border-radius: 3px;
+}
+.phase-list { margin-top: 12px; }
+.phase-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; font-size: 13px;
+}
+.phase-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--border); flex-shrink: 0;
+}
+.phase-dot.active { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.phase-dot.done { background: var(--green); }
+.phase-dot.fail { background: var(--red); }
+.phase-label { flex:1; }
+.phase-time { color: var(--text-dim); font-size: 12px; }
+
+/* ── Main content ─────────────────────────────────────── */
+.main {
+  flex: 1; display: flex; flex-direction: column;
+  overflow: hidden; position: relative;
+}
+.tabs {
+  display: flex; border-bottom: 1px solid var(--border);
+  background: var(--surface); padding: 0 24px;
+  gap: 0; overflow-x: auto;
+}
+.tab {
+  padding: 12px 20px; font-size: 13px; font-weight: 500;
+  color: var(--text-dim); cursor: pointer;
+  border-bottom: 2px solid transparent; transition: all 0.15s;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-count {
+  font-size: 10px; background: var(--border); color: var(--text-dim);
+  padding: 1px 6px; border-radius: 10px; margin-left: 6px;
+}
+.tab.active .tab-count { background: var(--accent); color: #fff; }
+
+.content {
+  flex: 1; padding: 32px 40px; overflow-y: auto;
+  line-height: 1.7;
+}
+
+/* ── Empty state ──────────────────────────────────────── */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 100%; gap: 16px;
+  color: var(--text-dim);
+}
+.empty-icon { font-size: 64px; opacity: 0.3; }
+.empty-title { font-size: 18px; font-weight: 600; color: var(--text); }
+.empty-desc { font-size: 14px; text-align: center; max-width: 360px; line-height:1.6; }
+
+/* ── Rendered content ─────────────────────────────────── */
+.content h1 { font-size: 22px; margin: 24px 0 12px; border-bottom:1px solid var(--border); padding-bottom:8px; }
+.content h2 { font-size: 18px; margin: 20px 0 10px; color: var(--accent); }
+.content h3 { font-size: 15px; margin: 16px 0 8px; }
+.content h4 { font-size: 14px; margin: 12px 0 6px; }
+.content p { margin: 6px 0; }
+.content blockquote {
+  border-left: 3px solid var(--accent); margin: 8px 0;
+  padding: 4px 16px; color: var(--text-dim);
+}
+.content table {
+  width: 100%; border-collapse: collapse; margin: 12px 0;
+  font-size: 13px;
+}
+.content th {
+  background: var(--surface); padding: 8px 12px;
+  text-align: left; font-weight: 600; border: 1px solid var(--border);
+}
+.content td {
+  padding: 6px 12px; border: 1px solid var(--border);
+}
+.content tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+.content code {
+  background: var(--surface); padding: 2px 6px;
+  border-radius: 4px; font-size: 13px;
+}
+.content pre {
+  background: var(--surface) !important; border: 1px solid var(--border);
+  border-radius: var(--radius); margin: 12px 0;
+  padding: 16px; overflow-x: auto; font-size: 13px;
+}
+.content pre code { background: none; padding: 0; }
+.content ul, .content ol { margin: 8px 0; padding-left: 24px; }
+.content li { margin: 4px 0; }
+.content hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+/* ── Toasts ───────────────────────────────────────────── */
+.toast-container {
+  position: fixed; top: 20px; right: 20px; z-index: 999;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.toast {
+  padding: 12px 20px; border-radius: var(--radius);
+  font-size: 14px; animation: slideIn 0.3s;
+  background: var(--surface); border: 1px solid var(--border);
+  max-width: 400px;
+}
+.toast.error { border-color: var(--red); color: var(--red); }
+@keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+
+/* ── Responsive ───────────────────────────────────────── */
+@media (max-width: 900px) {
+  body { flex-direction: column; }
+  .sidebar { width: 100%; min-width: 100%; max-height: 50vh; }
+  .content { padding: 24px 20px; }
+}
+
+/* ── Settings Modal ──────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  display: none; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; width: 520px; max-width: 90vw;
+  max-height: 85vh; overflow-y: auto; padding: 32px;
+}
+.modal h2 { font-size: 18px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+.modal .close-btn {
+  margin-left: auto; background: none; border: none;
+  color: var(--text-dim); font-size: 22px; cursor: pointer;
+}
+.modal .close-btn:hover { color: var(--text); }
+.modal .form-group { margin-bottom: 16px; }
+.modal .form-hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.modal .form-row { display: flex; gap: 12px; }
+.modal .form-row .form-group { flex: 1; }
+.modal .form-actions { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
+.settings-gear {
+  background: none; border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 18px; cursor: pointer;
+  padding: 4px 8px; border-radius: var(--radius);
+  float: right; transition: all 0.15s;
+}
+.settings-gear:hover { border-color: var(--accent); color: var(--accent); }
+.status-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  margin-right: 6px;
+}
+.status-dot.ok { background: var(--green); }
+.status-dot.err { background: var(--red); }
+.connection-result { font-size: 13px; padding: 8px 12px; border-radius: var(--radius); margin-top: 8px; }
+.connection-result.ok { background: rgba(63,185,80,0.15); color: var(--green); }
+.connection-result.err { background: rgba(248,81,73,0.15); color: var(--red); }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="logo">
+    <button class="settings-gear" onclick="openSettings()" title="设置">&#9881;</button>
+    <span>需求到代码</span> Agent
+    <p>PRD → 用户故事 → 数据库 → API → 代码 → 测试 → 审查</p>
+  </div>
+
+  <div>
+    <label for="projectName">项目名称</label>
+    <input type="text" id="projectName" placeholder="例如：用户管理系统" value="用户管理系统">
+  </div>
+
+  <div>
+    <label for="prdInput">
+      需求文档 (PRD)
+      <span style="color:var(--text-dim);font-weight:400;float:right;">
+        <a href="#" onclick="loadSample()" style="color:var(--accent);">加载示例</a>
+      </span>
+    </label>
+    <textarea id="prdInput" placeholder="粘贴你的 PRD 或需求描述...&#10;&#10;例如：&#10;## 用户注册&#10;- 用户通过邮箱和密码注册&#10;- 密码长度 8-20 位&#10;- 邮箱不可重复注册&#10;- 注册成功后发送验证邮件"></textarea>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-primary" id="btnRun" onclick="startPipeline()">
+      ▶ 运行流水线
+    </button>
+    <button class="btn btn-secondary" id="btnClear" onclick="clearAll()">
+      清空
+    </button>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-section" id="progressSection" style="display:none;">
+    <div class="progress-header">
+      <span id="progressLabel">准备中...</span>
+      <span id="progressPercent">0%</span>
+    </div>
+    <div class="progress-bar-outer">
+      <div class="progress-bar-inner" id="progressBar"></div>
+    </div>
+    <div class="phase-list" id="phaseList"></div>
+  </div>
+</aside>
+
+<!-- Main -->
+<main class="main">
+  <nav class="tabs" id="tabBar">
+    <div class="tab active" data-tab="overview">概览</div>
+  </nav>
+  <div class="content" id="contentArea">
+    <div class="empty-state">
+      <div class="empty-icon">🚀</div>
+      <div class="empty-title">开始你的需求分析之旅</div>
+      <div class="empty-desc">在左侧粘贴 PRD 需求文档，点击「运行流水线」，<br>AI Agent 将自动完成从需求分析到代码生成的完整流程。</div>
+    </div>
+  </div>
+</main>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsOverlay" onclick="closeSettings(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h2>
+      &#9881; 设置
+      <button class="close-btn" onclick="closeSettings()">&times;</button>
+    </h2>
+    <div class="form-group">
+      <label for="setApiKey">API Key</label>
+      <input type="password" id="setApiKey" placeholder="sk-... (留空使用 .env 配置)">
+      <div class="form-hint">支持 Anthropic 官方 Key 或兼容 API 的 Key</div>
+    </div>
+    <div class="form-group">
+      <label for="setBaseUrl">API Base URL</label>
+      <input type="text" id="setBaseUrl" placeholder="https://api.anthropic.com (默认)">
+      <div class="form-hint">自定义 API 站点地址，如使用代理或兼容服务时填写</div>
+    </div>
+    <div class="form-group">
+      <label for="setModel">模型名称</label>
+      <input type="text" id="setModel" placeholder="claude-sonnet-4-6">
+      <div class="form-hint">可填写任意 Claude 模型或其他兼容模型名</div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="setTemperature">Temperature</label>
+        <input type="number" id="setTemperature" value="0.3" min="0" max="1" step="0.1">
+      </div>
+      <div class="form-group">
+        <label for="setMaxTokens">Max Tokens</label>
+        <input type="number" id="setMaxTokens" value="8192" min="100" max="32000" step="100">
+      </div>
+    </div>
+    <div id="connectionResult"></div>
+    <div class="form-actions">
+      <button class="btn btn-secondary" id="btnTestConn" onclick="testConnection()">测试连接</button>
+      <button class="btn btn-secondary" onclick="closeSettings()">取消</button>
+      <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ── State ───────────────────────────────────────────────
+let currentRunId = null;
+let eventSource = null;
+let tabData = {};
+const PHASES = [
+  { id:'analyst',  name:'Phase 1: 产品分析', icon:'📋' },
+  { id:'architect', name:'Phase 2: 架构设计', icon:'🏗️' },
+  { id:'backend',  name:'Phase 3a: 后端代码', icon:'💻' },
+  { id:'test',     name:'Phase 3b: 测试用例', icon:'🧪' },
+  { id:'reviewer', name:'Phase 4: 审查报告', icon:'🔍' },
+];
+
+// ── Tabs ────────────────────────────────────────────────
+function showTab(tabId) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`[data-tab="${tabId}"]`)?.classList.add('active');
+
+  const content = document.getElementById('contentArea');
+  if (tabId === 'overview') {
+    renderOverview();
+  } else if (tabData[tabId]) {
+    content.innerHTML = renderMarkdown(tabData[tabId]);
+    hljs.highlightAll();
+  } else {
+    content.innerHTML = `<div class="empty-state"><div class="empty-title">暂无数据</div><div class="empty-desc">等待流水线完成此阶段...</div></div>`;
+  }
+}
+
+function addTab(id, label, count) {
+  const bar = document.getElementById('tabBar');
+  if (bar.querySelector(`[data-tab="${id}"]`)) return;
+  const tab = document.createElement('div');
+  tab.className = 'tab';
+  tab.dataset.tab = id;
+  tab.innerHTML = `${label}<span class="tab-count">${count}</span>`;
+  tab.onclick = () => showTab(id);
+  bar.appendChild(tab);
+}
+
+// ── Markdown Rendering ─────────────────────────────────
+marked.setOptions({ breaks: true, gfm: true });
+function renderMarkdown(text) {
+  if (!text) return '';
+  return marked.parse(text);
+}
+
+// ── Pipeline Control ────────────────────────────────────
+async function startPipeline() {
+  const prdText = document.getElementById('prdInput').value.trim();
+  const projectName = document.getElementById('projectName').value.trim() || 'Unnamed Project';
+
+  if (!prdText) {
+    toast('请先输入需求文档内容', 'error');
+    return;
+  }
+
+  // Reset
+  currentRunId = null;
+  tabData = {};
+  document.getElementById('tabBar').innerHTML = '<div class="tab active" data-tab="overview">概览</div>';
+  document.getElementById('contentArea').innerHTML = '<div class="empty-state"><div class="empty-title">准备中...</div></div>';
+
+  // Show progress
+  const progSection = document.getElementById('progressSection');
+  progSection.style.display = 'block';
+  document.getElementById('progressBar').style.width = '0%';
+  document.getElementById('progressPercent').textContent = '0%';
+  document.getElementById('progressLabel').textContent = '启动中...';
+
+  // Init phase list
+  const phaseList = document.getElementById('phaseList');
+  phaseList.innerHTML = PHASES.map((p, i) => `
+    <div class="phase-item" id="phase-${i}">
+      <div class="phase-dot"></div>
+      <span class="phase-label">${p.icon} ${p.name}</span>
+      <span class="phase-time"></span>
+    </div>
+  `).join('');
+
+  // Disable button
+  const btn = document.getElementById('btnRun');
+  btn.disabled = true;
+  btn.textContent = '⏳ 运行中...';
+
+  try {
+    const form = new FormData();
+    form.append('prd_text', prdText);
+    form.append('project_name', projectName);
+
+    const resp = await fetch('/api/run', { method: 'POST', body: form });
+    const { run_id } = await resp.json();
+    currentRunId = run_id;
+
+    // Connect SSE
+    connectSSE(run_id);
+  } catch (e) {
+    toast('启动失败: ' + e.message, 'error');
+    resetButton();
+  }
+}
+
+function connectSSE(runId) {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`/api/run/${runId}/stream`);
+
+  eventSource.addEventListener('phase_start', (e) => {
+    const d = JSON.parse(e.data);
+    updatePhaseUI(d.phase_num - 1, 'active');
+    document.getElementById('progressLabel').textContent = d.agent;
+    document.getElementById('progressBar').style.width = `${(d.phase_num - 1) * 25}%`;
+    document.getElementById('progressPercent').textContent = `${(d.phase_num - 1) * 25}%`;
+  });
+
+  eventSource.addEventListener('phase_end', (e) => {
+    const d = JSON.parse(e.data);
+    const idx = PHASES.findIndex(p => p.id === d.agent.toLowerCase().replace(/[^a-z]/g, '')
+      .replace('productanalyst','analyst').replace('backenddeveloper','backend')
+      .replace('testengineer','test'));
+    const pi = idx >= 0 ? idx : d.phase.split('/')[0].replace('Phase ','') - 1;
+    updatePhaseUI(pi, 'done', d.duration_ms);
+    document.getElementById('progressBar').style.width = `${(pi + 1) * 25}%`;
+    document.getElementById('progressPercent').textContent = `${(pi + 1) * 25}%`;
+    document.getElementById('progressLabel').textContent = `${d.agent} 完成`;
+  });
+
+  eventSource.addEventListener('complete', async (e) => {
+    eventSource.close();
+    document.getElementById('progressBar').style.width = '100%';
+    document.getElementById('progressPercent').textContent = '100%';
+    document.getElementById('progressLabel').textContent = '全部完成!';
+    resetButton();
+    await loadResults(runId);
+  });
+
+  eventSource.addEventListener('error', (e) => {
+    if (e.data && e.data !== '{}') {
+      try {
+        const d = JSON.parse(e.data);
+        toast(d.error || '运行失败', 'error');
+      } catch {}
+    }
+    eventSource.close();
+    resetButton();
+  });
+
+  eventSource.onerror = () => {
+    // SSE connection error - may reconnect automatically
+  };
+}
+
+function updatePhaseUI(index, status, durationMs) {
+  const el = document.getElementById(`phase-${index}`);
+  if (!el) return;
+  const dot = el.querySelector('.phase-dot');
+  const time = el.querySelector('.phase-time');
+  dot.classList.remove('active', 'done', 'fail');
+  if (status === 'active') dot.classList.add('active');
+  if (status === 'done') dot.classList.add('done');
+  if (status === 'fail') dot.classList.add('fail');
+  if (durationMs !== undefined) {
+    time.textContent = (durationMs / 1000).toFixed(1) + 's';
+  }
+}
+
+function resetButton() {
+  const btn = document.getElementById('btnRun');
+  btn.disabled = false;
+  btn.textContent = '▶ 运行流水线';
+}
+
+// ── Load Results ────────────────────────────────────────
+async function loadResults(runId) {
+  try {
+    const resp = await fetch(`/api/run/${runId}/results`);
+    const data = await resp.json();
+    if (data.status !== 'completed') return;
+
+    // Build tab content
+    const tabs = [];
+
+    // Overview
+    let overview = `# 项目概览: ${data.project_name}\n\n`;
+    overview += `> ${data.summary}\n\n`;
+    overview += `## 生成产物统计\n\n`;
+    overview += `| 阶段 | 产物 | 数量 |\n`;
+    overview += `|------|------|------|\n`;
+    overview += `| Phase 1 | 功能模块 | ${(data.functional_modules||[]).length} |\n`;
+    overview += `| Phase 1 | 用户故事 | ${(data.user_stories||[]).length} |\n`;
+    overview += `| Phase 2 | 数据表 | ${(data.db_schema||[]).length} |\n`;
+    overview += `| Phase 2 | API 端点 | ${(data.api_contracts||[]).length} |\n`;
+    overview += `| Phase 3a | 代码文件 | ${(data.code_artifacts||[]).length} |\n`;
+    overview += `| Phase 3b | 测试用例 | ${(data.test_cases||[]).length} |\n`;
+    if (data.review_report) {
+      overview += `| Phase 4 | 一致性问题 | ${(data.review_report.consistency_issues||[]).length} |\n`;
+      overview += `| Phase 4 | 开发任务 | ${(data.review_report.tasks||[]).length} |\n`;
+    }
+    tabData['overview'] = overview;
+
+    // User Stories
+    let storiesMd = `# 产品需求分析\n\n> 项目: ${data.project_name}\n\n`;
+    storiesMd += `## 功能模块\n\n`;
+    (data.functional_modules||[]).forEach(m => {
+      storiesMd += `### ${m.name}\n${m.description||''}\n\n`;
+    });
+    storiesMd += `## 用户故事详情\n\n`;
+    (data.user_stories||[]).forEach(s => {
+      storiesMd += `### ${s.id}: ${s.title}\n`;
+      storiesMd += `- **优先级**: ${s.priority}\n`;
+      storiesMd += `- **作为**: ${s.as_a}\n`;
+      storiesMd += `- **我想要**: ${s.i_want}\n`;
+      storiesMd += `- **以便**: ${s.so_that}\n\n`;
+      if ((s.acceptance_criteria||[]).length) {
+        storiesMd += `**验收标准**:\n`;
+        s.acceptance_criteria.forEach((ac,i) => {
+          storiesMd += `${i+1}. Given **${ac.given}**, When **${ac.when}**, Then **${ac.then}**\n`;
+        });
+        storiesMd += '\n';
+      }
+      if ((s.boundary_conditions||[]).length) {
+        storiesMd += `| 场景 | 类别 | 输入 | 期望行为 |\n`;
+        storiesMd += `|------|------|------|----------|\n`;
+        s.boundary_conditions.forEach(bc => {
+          storiesMd += `| ${bc.scenario} | ${bc.category} | ${bc.input_condition} | ${bc.expected_behavior} |\n`;
+        });
+        storiesMd += '\n';
+      }
+      storiesMd += '---\n\n';
+    });
+    tabData['stories'] = storiesMd;
+    tabs.push(['stories', '📋 用户故事', data.user_stories?.length||0]);
+
+    // DB Schema
+    let dbMd = `# 数据库设计\n\n> 数据表: ${(data.db_schema||[]).length} 个\n\n`;
+    (data.db_schema||[]).forEach(t => {
+      dbMd += `## ${t.name}\n`;
+      if (t.comment) dbMd += `*${t.comment}*\n\n`;
+      if (t.ddl) dbMd += `\`\`\`sql\n${t.ddl}\n\`\`\`\n\n`;
+      dbMd += `| 列名 | 类型 | 可空 | 主键 | 说明 |\n`;
+      dbMd += `|------|------|------|------|------|\n`;
+      (t.columns||[]).forEach(c => {
+        dbMd += `| ${c.name} | ${c.type} | ${c.nullable?'Y':'N'} | ${c.primary_key?'Y':''} | ${c.comment||''} |\n`;
+      });
+      dbMd += '\n';
+    });
+    tabData['database'] = dbMd;
+    tabs.push(['database', '🗄️ 数据库', data.db_schema?.length||0]);
+
+    // API
+    let apiMd = `# API 接口契约\n\n> 端点: ${(data.api_contracts||[]).length} 个\n\n`;
+    (data.api_contracts||[]).forEach(a => {
+      apiMd += `### ${a.method} ${a.path}\n**${a.summary}**\n\n${a.description||''}\n\n`;
+      if (a.request_body_schema) apiMd += `**请求体**:\n\`\`\`json\n${a.request_body_schema}\n\`\`\`\n\n`;
+      if (a.response_schema) apiMd += `**响应体**:\n\`\`\`json\n${a.response_schema}\n\`\`\`\n\n`;
+      apiMd += '---\n\n';
+    });
+    tabData['api'] = apiMd;
+    tabs.push(['api', '🔌 API契约', data.api_contracts?.length||0]);
+
+    // Code
+    let codeMd = `# 代码骨架\n\n> 文件: ${(data.code_artifacts||[]).length} 个\n\n`;
+    (data.code_artifacts||[]).forEach(c => {
+      codeMd += `### ${c.file_path}\n*${c.description||''}*\n\n`;
+      codeMd += `\`\`\`${c.language||'java'}\n${c.content}\n\`\`\`\n\n---\n\n`;
+    });
+    tabData['code'] = codeMd;
+    tabs.push(['code', '💻 代码', data.code_artifacts?.length||0]);
+
+    // Tests
+    let testMd = `# 测试用例\n\n> 用例: ${(data.test_cases||[]).length} 个\n\n`;
+    ['unit','integration','boundary'].forEach(type => {
+      const cases = (data.test_cases||[]).filter(tc => tc.type === type);
+      if (!cases.length) return;
+      testMd += `## ${type.toUpperCase()} 测试\n\n`;
+      cases.forEach(tc => {
+        testMd += `### ${tc.id}: ${tc.title}\n`;
+        testMd += `- **类型**: ${tc.type}\n`;
+        if (tc.related_api) testMd += `- **关联 API**: ${tc.related_api}\n`;
+        if (tc.steps?.length) {
+          testMd += `\n**步骤**:\n`;
+          tc.steps.forEach((s,i) => { testMd += `${i+1}. ${s}\n`; });
+        }
+        testMd += `\n**期望**: ${tc.expected_result}\n`;
+        if (tc.code) testMd += `\n\`\`\`java\n${tc.code}\n\`\`\`\n`;
+        testMd += '\n---\n\n';
+      });
+    });
+    tabData['tests'] = testMd;
+    tabs.push(['tests', '🧪 测试', data.test_cases?.length||0]);
+
+    // Review
+    if (data.review_report) {
+      let reviewMd = `# 审查报告\n\n## 摘要\n\n${data.review_report.summary||''}\n\n`;
+      const issues = data.review_report.consistency_issues||[];
+      if (issues.length) {
+        reviewMd += `## 一致性问题 (${issues.length})\n\n`;
+        reviewMd += `| 严重度 | 类别 | 位置 | 详情 | 建议 |\n`;
+        reviewMd += `|--------|------|------|------|------|\n`;
+        issues.forEach(i => {
+          reviewMd += `| ${i.severity} | ${i.category} | ${i.location} | ${i.detail} | ${i.suggestion||''} |\n`;
+        });
+      }
+      tabData['review'] = reviewMd;
+      tabs.push(['review', '🔍 审查', data.review_report.consistency_issues?.length||0]);
+
+      // Tasks
+      const tasks = data.review_report.tasks||[];
+      let taskMd = `# 开发任务拆分\n\n> 任务: ${tasks.length} 个 | 预估: ${tasks.reduce((s,t)=>s+(t.estimated_hours||0),0).toFixed(1)}h\n\n`;
+      const phases = {};
+      tasks.forEach(t => {
+        const p = t.assigned_phase || 'other';
+        (phases[p] = phases[p]||[]).push(t);
+      });
+      Object.entries(phases).forEach(([phase, pts]) => {
+        taskMd += `## ${phase.toUpperCase()}\n\n`;
+        taskMd += `| ID | 标题 | 优先级 | 预估(h) | 依赖 |\n`;
+        taskMd += `|----|------|--------|---------|------|\n`;
+        pts.forEach(t => {
+          taskMd += `| ${t.id} | ${t.title} | ${t.priority} | ${t.estimated_hours} | ${(t.depends_on||[]).join(', ')||'-'} |\n`;
+        });
+        taskMd += '\n';
+      });
+      tabData['tasks'] = taskMd;
+      tabs.push(['tasks', '📋 任务拆分', tasks.length]);
+    }
+
+    // Render tabs
+    const bar = document.getElementById('tabBar');
+    bar.innerHTML = '<div class="tab active" data-tab="overview">概览</div>';
+    tabs.forEach(([id, label, count]) => {
+      const t = document.createElement('div');
+      t.className = 'tab';
+      t.dataset.tab = id;
+      t.innerHTML = `${label}<span class="tab-count">${count}</span>`;
+      t.onclick = () => showTab(id);
+      bar.appendChild(t);
+    });
+
+    // Show overview
+    showTab('overview');
+
+  } catch (e) {
+    console.error('Failed to load results:', e);
+  }
+}
+
+// ── Utils ───────────────────────────────────────────────
+function clearAll() {
+  document.getElementById('prdInput').value = '';
+  document.getElementById('projectName').value = '';
+  document.getElementById('progressSection').style.display = 'none';
+  document.getElementById('tabBar').innerHTML = '<div class="tab active" data-tab="overview">概览</div>';
+  document.getElementById('contentArea').innerHTML = `<div class="empty-state">
+    <div class="empty-icon">🚀</div>
+    <div class="empty-title">开始你的需求分析之旅</div>
+    <div class="empty-desc">在左侧粘贴 PRD 需求文档，点击「运行流水线」，<br>AI Agent 将自动完成从需求分析到代码生成的完整流程。</div>
+  </div>`;
+  tabData = {};
+  if (eventSource) eventSource.close();
+  currentRunId = null;
+  resetButton();
+}
+
+async function loadSample() {
+  const sample = `# 用户管理系统 PRD
+
+## 项目背景
+构建一个通用的用户管理系统，支持用户注册、登录、个人信息管理等功能。
+
+## 功能需求
+
+### 1. 用户注册
+- 用户通过邮箱和密码注册账号
+- 密码长度 8-20 位，需包含字母和数字
+- 邮箱需验证格式，不可重复注册
+- 注册成功后发送验证邮件
+
+### 2. 用户登录
+- 使用邮箱 + 密码登录
+- 登录成功后返回 JWT token
+- 密码错误 5 次后锁定账号 30 分钟
+- 支持"记住我"功能（token 有效期 7 天）
+
+### 3. 个人信息管理
+- 查看个人信息（昵称、头像、手机号等）
+- 修改个人资料（昵称、头像、手机号）
+- 修改密码（需验证旧密码）
+
+### 4. 管理员功能
+- 管理员可查看用户列表（支持分页和搜索）
+- 管理员可禁用/启用用户账号
+- 管理员可查看用户统计（注册趋势、活跃度等）
+
+## 非功能需求
+- 所有 API 需做鉴权（除注册和登录）
+- 密码使用 bcrypt 加密存储`;
+  document.getElementById('prdInput').value = sample;
+  document.getElementById('projectName').value = '用户管理系统';
+  toast('示例 PRD 已加载');
+}
+
+function toast(msg, type) {
+  const container = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = `toast ${type||''}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => { el.remove(); }, 4000);
+}
+
+// Tab bar click delegation
+document.getElementById('tabBar').addEventListener('click', (e) => {
+  const tab = e.target.closest('.tab');
+  if (tab) showTab(tab.dataset.tab);
+});
+
+// ── Settings ──────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const resp = await fetch('/api/settings');
+    const s = await resp.json();
+    document.getElementById('setApiKey').value = s.api_key || '';
+    document.getElementById('setBaseUrl').value = s.base_url || '';
+    document.getElementById('setModel').value = s.model || '';
+    document.getElementById('setTemperature').value = s.temperature || 0.3;
+    document.getElementById('setMaxTokens').value = s.max_tokens || 8192;
+  } catch (e) {
+    console.error('Failed to load settings:', e);
+  }
+}
+
+function openSettings() {
+  loadSettings();
+  document.getElementById('settingsOverlay').classList.add('show');
+  document.getElementById('connectionResult').innerHTML = '';
+}
+
+function closeSettings(e) {
+  if (e && e.target !== document.getElementById('settingsOverlay')) return;
+  document.getElementById('settingsOverlay').classList.remove('show');
+}
+
+async function saveSettings() {
+  const apiKey = document.getElementById('setApiKey').value.trim();
+  const baseUrl = document.getElementById('setBaseUrl').value.trim();
+  const model = document.getElementById('setModel').value.trim();
+  const temperature = parseFloat(document.getElementById('setTemperature').value) || 0.3;
+  const maxTokens = parseInt(document.getElementById('setMaxTokens').value) || 8192;
+
+  try {
+    const resp = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: apiKey,
+        base_url: baseUrl,
+        model: model,
+        temperature: temperature,
+        max_tokens: maxTokens,
+      }),
+    });
+    const data = await resp.json();
+    if (data.status === 'saved') {
+      toast('设置已保存');
+      closeSettings();
+    }
+  } catch (e) {
+    toast('保存失败: ' + e.message, 'error');
+  }
+}
+
+async function testConnection() {
+  const btn = document.getElementById('btnTestConn');
+  const resultDiv = document.getElementById('connectionResult');
+  btn.disabled = true;
+  btn.textContent = '测试中...';
+  resultDiv.innerHTML = '';
+
+  // Save settings first so backend uses them
+  const apiKey = document.getElementById('setApiKey').value.trim();
+  const baseUrl = document.getElementById('setBaseUrl').value.trim();
+  const model = document.getElementById('setModel').value.trim();
+  const temperature = parseFloat(document.getElementById('setTemperature').value) || 0.3;
+  const maxTokens = parseInt(document.getElementById('setMaxTokens').value) || 8192;
+
+  try {
+    // Save before testing
+    await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: apiKey,
+        base_url: baseUrl,
+        model: model,
+        temperature: temperature,
+        max_tokens: maxTokens,
+      }),
+    });
+
+    const resp = await fetch('/api/settings/test', { method: 'POST' });
+    const data = await resp.json();
+    if (data.status === 'ok') {
+      resultDiv.innerHTML = `<div class="connection-result ok"><span class="status-dot ok"></span>${data.message}</div>`;
+    } else {
+      resultDiv.innerHTML = `<div class="connection-result err"><span class="status-dot err"></span>${data.message}</div>`;
+    }
+  } catch (e) {
+    resultDiv.innerHTML = `<div class="connection-result err"><span class="status-dot err"></span>${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '测试连接';
+  }
+}
+
+// Keyboard shortcut: Escape to close settings
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeSettings();
+});
+
+// Load settings on page load
+loadSettings();
+</script>
+</body>
+</html>
